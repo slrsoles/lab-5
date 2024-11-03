@@ -1,9 +1,11 @@
 ---
 title: "Lab 5: Murder in SQL City"
-author: "Your name here!"
+author: "Skylar Richards"
 format: html
 editor: source
 embed-resources: true
+code-tools: true
+toc: true
 ---
 
 For this lab, you will be joining and filtering related datasets to solve a murder mystery!
@@ -37,9 +39,11 @@ This code chunk will read in all of the tables of data for you. Don't modify or 
 #| message: false
 #| warning: false
 #| label: read-in-data
+#| code-fold: true
+
 
 library(tidyverse)
-
+library(lubridate)
 # If purrr is not detected, install the package
 if (!"purrr" %in% installed.packages()) install.packages("purrr")
 
@@ -56,14 +60,130 @@ Detective Wickham reaches out to you...
 
 ```{r}
 #| label: inspecting-crime-scene-report
+#| code-fold: true
+filtered_crime_scene_report <- crime_scene_report|>
+  mutate(date = ymd(date))|> # convert dates into date format 
+  filter(type == "murder",
+         date == "2018-01-15",
+         city == "SQL City") 
+# Security footage shows that there were 2 witnesses. The first witness lives at the last house on "Northwestern Dr". The second witness, named Annabel, lives somewhere on "Franklin Ave".
+
+filtered_person <- person |> # filter person list to find suspects in one step.
+  filter(
+    (address_street_name == "Franklin Ave" & str_detect(name, "Annabel")) |
+      (address_street_name == "Northwestern Dr" & address_number == max(address_number))
+  )
+
+# connect witnesses to get fit now membership
+
+
+interview_witness <- filtered_person|> #get interviews of witnesses
+  inner_join(interview,
+             by = c("id" = "person_id"))
+  
+# I saw the murder happen, and I recognized the killer from my gym when I was working out last week on January the 9th.
+ # I heard a gunshot and then saw a man run out. He had a "Get Fit Now Gym" bag. The membership number on the bag started with "48Z". Only gold members have those bags. The man got into a car with a plate that included "H42W".
+
+
+suspect_killer <- drivers_license|>
+  filter(gender == "male",
+         str_detect(plate_number, "H42W"))|>
+  rename(license_id = id) |>
+ inner_join(person, by = "license_id") |>
+  inner_join(get_fit_now_member, by = c("id" = "person_id", "name" = "name"))|>
+  rename(membership_id = id.y)|>
+  inner_join(get_fit_now_check_in, by = "membership_id")|>
+  filter(check_in_date == "20180109",
+         str_detect(membership_id, "^48Z"))
+
+
+
+killer_interview <- suspect_killer|> # get the interview of killer to discover who hired them.
+  inner_join(interview,
+             by = c("id" = "person_id"))
+ 
+# "I was hired by a woman with a lot of money. I don't know her name but I know she's around 5'5" (65") or 5'7" (67"). She has red hair and she drives a Tesla Model S. I know that she attended the SQL Symphony Concert 3 times in December 2017." - Murderer
+
+suspect_boss <- facebook_event_checkin|>
+  filter(event_name == "SQL Symphony Concert",
+         str_detect(date, "201712"))|> # filter for check ins to event during December 2017
+  group_by(person_id)|>
+  filter(n() == 3)|> # filter for 3 check ins to the event 
+  ungroup()|>
+  select(person_id)|>
+  distinct()|> # select only unique person IDs
+  inner_join(person, by = c("person_id" = "id"))|> # connect check in database to person database
+  inner_join(drivers_license, by = c("license_id" = "id"))|> # connect person data to drivers license data 
+  filter(car_make == "Tesla",
+         car_model == "Model S",
+         hair_color == "red",
+         65 <= height,
+         height <= 67) # confirm car and personal description
+
+
+interview_boss <- suspect_boss|>
+  inner_join(interview, by = "person_id") # see if boss was interviewed at all 
 
 ```
+## Finding Important Witnesses 
+First we have to narrow down our crime scene data using the fact that the murder was in SQL city on January 15, 2018. This filtering yields us the following crime scene discription:
+
+```{r}
+#| code-fold: true
+filtered_crime_scene_report$description
+```
+## Interviewing Witnesses
+Now we have to find our witnesses. We can filter down the person database to find the person who lives on the last house on Northwestern Dr. and someone named Annabel who lives on Franlink Ave
+
+```{r}
+#| code-fold: true
+filtered_person
+```
+Now that we have the suspects we can use their ID's here to link them to the interviews they gave which can hopefully help us learn about the murder. 
+
+```{r}
+#| code-fold: true
+interview_witness$transcript
+```
+
+## Finding the Killer
+Now we have some details about the killer. We know that they attended Get Fit Now on January the 9th as well as having a membership number that started with 48Z. In addition to this we know that part of their license plate contains H42W and that the suspect is a man wiht a gold membership.
+
+First we can filter our drivers license data to eliminate any suspects who aren't male and who do not have H42W in their license plate.
+
+Then we can filter our gym check in data to eliminate suspects who did not check in on January the 9th and whos membership number does not start with 48Z
+
+After these filters are combined it yields us a suspect with the following data: 
+```{r}
+#| code-fold: true
+suspect_killer$name
+suspect_killer$gender
+suspect_killer$membership_id
+suspect_killer$plate_number
+suspect_killer$membership_status
+
+```
+## Killer's Motivation
+Now we have the information of the killer, but we still don't have a motive. To figure our why he might do this we can check for the interview he gave:
+
+```{r}
+#| code-fold: true
+killer_interview$transcript
+```
+## Finding Who Hired the Killer
+Not only do we now have his confession for the murder but also the motive. To find the person that hired the killer we can start by checking those who attended SQL symphony concert 3 times in December 2017. This yields us 2 unique IDs. With the ID's we can go back to the person database and check for the correct height and for the gender of the person with that ID. This yields us only one remaining suspect. Finally, we can check for the vehicle they drive by cross refrencing with the drivers license data. This confirms that the person who hired our killer is Miranda Priestly. After checking our interviews we can also see that Miranda was not interviewed so the lead ends with her. 
+
+## Case Conclusion
+Finally, our investigation can be put to rest and both the killer, Jeremy Bowers, and the mastermind of the operation, Miranda Priestly, can be arrested and charged for their crimes.
+
+
 
 
 **Follow the evidence to the person responsible for the murder, building a report as you go.**
 Hint: Make sure you check for interviews with any suspects!
 
 
-## And the final suspect is...
 
-*Put the name of the person responsible for the murder here:*
+
+
+
